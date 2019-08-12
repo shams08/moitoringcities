@@ -1,0 +1,135 @@
+// load DMSP Data for 2 separate years
+
+var dataset = ee.ImageCollection('NOAA/DMSP-OLS/NIGHTTIME_LIGHTS')
+                  .filter(ee.Filter.date('1993-01-01', '1993-12-31'));
+var dataset2 = ee.ImageCollection('NOAA/DMSP-OLS/NIGHTTIME_LIGHTS')
+                  .filter(ee.Filter.date('2012-01-01', '2012-12-31'));
+
+//Load VIIRS data for 2 separate months
+var dataset3 = ee.ImageCollection('NOAA/VIIRS/DNB/MONTHLY_V1/VCMCFG')
+                  .filter(ee.Filter.date('2017-08-01', '2017-08-31'));
+var dataset4 = ee.ImageCollection('NOAA/VIIRS/DNB/MONTHLY_V1/VCMCFG')
+                  .filter(ee.Filter.date('2017-10-01', '2017-10-30'));
+
+
+//select 'stable light' band from DMSP data
+var DMSP_NL_1993 = dataset.select('stable_lights');
+var DMSP_NL_2012 = dataset2.select('stable_lights');
+//select 'avg_rad' band from VIIRS data
+var viirs_NL_t1 = dataset3.select('avg_rad');
+var viirs_NL_t2 = dataset4.select('avg_rad');
+
+
+
+//Create Map Layers
+Map.setCenter(-86.1581, 39.7684, 9); //Indianapolis
+var DMSP_NL_t1 = ee.Image(DMSP_NL_1993.mean());
+var DMSP_NL_t2 = ee.Image(DMSP_NL_2012.mean());
+var VIIRS_NL_t1 = ee.Image(viirs_NL_t1.mean());
+var VIIRS_NL_t2 = ee.Image(viirs_NL_t2.mean());
+
+
+
+// eliminate pixels that have less than 10 rediance value for 2nd year.
+//this is done for find out the areas where night light % change actually matters
+//for DMSP
+var year2_DMSP = DMSP_NL_t2.gt(10);
+DMSP_NL_t2 = DMSP_NL_t2.updateMask(year2_DMSP);
+//for VIIRS
+var year1_viirs = VIIRS_NL_t1.gt(5);
+VIIRS_NL_t1 = VIIRS_NL_t1.updateMask(year1_viirs);
+
+// Create a circlural ROI; However, you can create any shape
+// 2 roi, 1 for DMSP data and 1 for VIIRS. you can also work with one
+var roi_DMSP = ee.Geometry.Point([-86.1581, 39.7684]).buffer(45000); //DMSP: Indianapolis
+var roi2_VIIRS = ee.Geometry.Point([-66.2, 18.3]).buffer(25000); //VIIRS: Puerto Rico
+
+
+//CALCULATE light % change
+//for DMSP
+var im3 = DMSP_NL_t2.subtract(DMSP_NL_t1);
+var DMSP_Change= im3.divide(DMSP_NL_t1).multiply(100);
+//for VIIRS
+var im3_v = VIIRS_NL_t2.subtract(VIIRS_NL_t1);
+var VIIRS_change= im3_v.divide(VIIRS_NL_t1).multiply(100);
+
+//Create map layers for google earth engine
+
+//create a black backgroud for better visualization of percent change map 
+Map.addLayer(viirs_NL_t1, {min:0, max:300000}, 'Black Backgroud');
+// layer for night light % change
+Map.addLayer(DMSP_Change, {min:0,max:[60,-30], bands:['stable_lights','stable_lights']}, 'DMSP Nighttime Lights % change');
+// layer for night light 1993
+Map.addLayer(DMSP_NL_1993, {min:10, max:63}, 'DMSP Nighttime Lights 1993');
+// layer for night light 2012
+Map.addLayer(DMSP_NL_2012, {min:10, max:63}, 'DMSP Nighttime Lights 2012');
+// Another layer for your Area of interest
+Map.addLayer(roi_DMSP,NaN,'ROI_DMSP');
+//VIIRS ROI. Here ROI is Eastern Puerto Rico
+Map.addLayer(roi2_VIIRS,NaN,'ROI_VIIRS');
+//Add VIIRS maps. 1 for before event and other for after event
+//Here Event is Hurricane Maria
+Map.addLayer(viirs_NL_t1, {min:0, max:20}, 'VIIRS NL before Event');
+
+Map.addLayer(viirs_NL_t2, {min:0, max:20}, 'VIIRS NL after Event');
+//Map for VIIRS night light percentage change
+Map.addLayer(VIIRS_change, {min:-100, max:100 , palette: ['blue', 'white', 'red']}, 'VIIRS Nighttime Lights % change');
+
+
+//Now Create a histogram for the % change 
+var options = {
+  //title: 'DMSP',
+  fontSize: 12,
+  hAxis: {title: 'Percentage change'},
+  vAxis: {title: 'No. of pixels'},
+  series: {0: {color: 'blue'}}}
+
+//Create histogram for your region of interest for DMSP 
+var histogram1 = ui.Chart.image.histogram(DMSP_Change, roi_DMSP, 30)
+    .setSeriesNames(['DMSP NIght Light % change from 1993-2012'])
+    .setOptions(options);
+// Display the histogram.
+print(histogram1);
+
+//Create histogram for your region of interest for VIIRS 
+var histogram2 = ui.Chart.image.histogram(VIIRS_change, roi2_VIIRS, 30)
+    .setSeriesNames(['VIIRS night light % change for H. Maria'])
+    .setOptions(options);
+// Display the histogram.
+print(histogram2);
+
+//-----------------------------------------------------------------
+//EXPORT MAPS
+
+//Export DMSP night light change map
+//Here you can create a larger ROI to export a larger map. See HW1 to create a rectangulart ROI 
+var pvisualization = DMSP_Change.visualize({
+  bands: ['stable_lights'],
+  min:0,
+  max: 160
+  }); 
+ 
+var DMSP = ee.Image(pvisualization)
+   // .updateMask(mask1)
+    .clip(roi_DMSP)   
+Export.image.toDrive({
+  image: DMSP,
+  description: 'DMSP_night_light_change',
+  scale: 800,
+  region: roi_DMSP});
+
+// Export VIIRS night light change map
+var pvisualization = VIIRS_change.visualize({
+  bands: ['avg_rad'],
+  min:10,
+  max: 30
+  }); 
+ 
+var VIIRS = ee.Image(pvisualization)
+   // .updateMask(mask1)
+    .clip(roi2_VIIRS)   
+Export.image.toDrive({
+  image: VIIRS,
+  description: 'VIIRS_night_light_change',
+  scale: 800,
+  region: roi2_VIIRS});
