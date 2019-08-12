@@ -1,0 +1,153 @@
+var elev = ee.Image('srtm90_v4');
+var mask1 = elev.mask();
+
+
+// Specify the city location geometry.
+var centerX = -73.952411, centerY = 40.606415;
+var width = 0.30, height = 0.30; 
+//var REGION = ee.Geometry.Rectangle( [centerX+width,centerY+height,  centerX-width,centerY-height]);
+
+//ROI as shape file
+var REGION = ee.FeatureCollection("users/sua215/Monitoring/NYC_boundary");
+ 
+Map.setCenter(centerX, centerY, 14);
+ 
+//__________________________________________
+//              NAIP
+//__________________________________________
+
+
+var collection = ee.ImageCollection('USDA/NAIP/DOQQ')
+    .filterDate('2015-05-01', '2015-08-01')
+    .filterBounds(REGION)
+    .mean();
+var image = ee.Image(collection)
+    .updateMask(mask1)
+    .clip(REGION);
+
+// This function computes NDVI from NAIP imagery.
+var getNDVI = function(image) {return image.normalizedDifference(['N', 'R']); };    
+    
+// Map the NDVI in the scenes.
+var ndvi = getNDVI(image);
+Map.addLayer(ndvi, {min: -0.8, max: 0.8, palette: ['0000ff', '00ff00']}, 'ndvi_1m');
+
+//visualize
+var vizParams = {
+  bands: ['R', 'G', 'B'],
+  min: 0,
+  max: 500,
+  gamma: [1, 1, 1]
+};
+
+
+// Create a binary layers using logical operations based on NDVI value.
+
+var vegetation = ndvi.updateMask(ndvi.gt(0.)); var vegetation = vegetation.updateMask(vegetation.lt(1));
+Map.addLayer(vegetation, {palette: ['000000', '00ff00']}, 'vegetation_1m');
+
+var water = ndvi.updateMask(ndvi.gt(-1)); var water = water.updateMask(water.lt(-.3)); 
+Map.addLayer(water, {palette: ['000000', '0000ff']}, 'water_1m');
+
+var building = ndvi.updateMask(ndvi.gt(-0.3)); var building = building.updateMask(building.lt(0.));
+Map.addLayer(building, {palette: ['000000', 'ff0000']}, 'building_1m');
+
+// Pre-define some customization options.
+var options = {
+  title: 'NDVI NAIP',
+  fontSize: 12,
+  hAxis: {title: 'NDVI'},
+  vAxis: {title: 'count'},
+  series: {0: {color: 'blue'}}
+};
+
+// Make the histogram, set the options.
+var histogram = ui.Chart.image.histogram(ndvi, REGION, 30)
+    .setSeriesNames([''])
+    .setOptions(options);
+
+// Display the histogram.
+print(histogram);
+
+// Export the image, specifying scale and region.
+Export.image.toDrive({
+  image: ndvi,
+  description: 'NDVI_1m',
+  scale: 15,
+  region: REGION.geometry().bounds()
+});
+
+//__________________________________________
+//              SENTINAL
+//__________________________________________
+
+
+// Create image collection of S-2 imagery for the perdiod 2016-2018
+var S2 = ee.ImageCollection('COPERNICUS/S2')
+
+//filter start and end date
+.filterDate('2018-09-01', '2018-10-31')
+//filter according to drawn boundary
+.filterBounds(REGION);
+
+// Function to mask cloud 
+var maskcloud1 = function(image) {
+var QA60 = image.select(['QA60']);
+return image.updateMask(QA60.lt(1));
+};
+
+// Function to calculate and add an NDVI band
+var addNDVI = function(image) {
+return image.addBands(image.normalizedDifference(['B8', 'B4']));
+};
+
+// Add NDVI band to image collection
+var S2 = S2.map(addNDVI);
+
+// Extract NDVI band and create NDVI median composite image
+var NDVI = S2.select(['nd']);
+var NDVI = NDVI.mean(); 
+var NDVI = ee.Image(NDVI).updateMask(mask1);
+// Create palettes for display of NDVI
+var ndvi_pal = ['0000ff', '00ff00']
+
+// Pre-define some customization options.
+var options = {
+  title: 'NDVI SENTINEL',
+  fontSize: 12,
+  hAxis: {title: 'NDVI'},
+  vAxis: {title: 'count'},
+  series: {0: {color: 'blue'}}
+};
+
+// Make the histogram, set the options.
+var histogram = ui.Chart.image.histogram(NDVI, REGION, 100)
+    .setSeriesNames([''])
+    .setOptions(options);
+
+// Display.
+print(histogram);
+
+// Display NDVI results on map
+var NDVI_sentinal = ee.Image(NDVI).clip(REGION)
+Map.addLayer(NDVI_sentinal, {min:-0.2, max:0.5, palette: ndvi_pal}, 'NDVI_10m');
+
+var vegetation = NDVI_sentinal.updateMask(NDVI_sentinal.gt(0.05)); 
+var vegetation = vegetation.updateMask(vegetation.lt(1));
+Map.addLayer(vegetation, {palette: ['000000', '00ff00']}, 'vegetation_10m');
+
+var water = NDVI_sentinal.updateMask(NDVI_sentinal.gt(-1)); 
+var water = water.updateMask(water.lt(-0.05)); 
+Map.addLayer(water, {palette: ['000000', '0000ff']}, 'water_10m');
+
+var building = NDVI_sentinal.updateMask(NDVI_sentinal.gt(-0.05)); 
+var building = building.updateMask(building.lt(0.05));
+Map.addLayer(building, {palette: ['000000', 'ff0000']}, 'building_10m');
+
+//export
+Export.image.toDrive({
+  image: NDVI_sentinal,
+  description: 'NDVI_10m',
+  scale: 15,
+  region: REGION.geometry().bounds()
+});
