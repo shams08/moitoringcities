@@ -1,0 +1,62 @@
+// Load Elevation Data
+var elev = ee.Image('srtm90_v4');
+var mask1 = elev.mask();
+
+// Specify the city location geometry. Increasing width and height too much will result in error due to too many pixels for the histogram
+var centerX = -94.9109, centerY = 30.0501; var width = 0.25, height = 0.25; var geometry = ee.Geometry.Rectangle( [centerX+width,centerY+height,  centerX-width,centerY-height]);
+
+//Draw a box around the region of interest 
+var rectangle = ee.Geometry.Rectangle(
+[centerX+width,centerY+height, 
+ centerX-width,centerY-height]); 
+
+//Center the mapview around your area
+Map.centerObject(geometry, 10);
+
+// Get the VH collection.
+var collectionVH = ee.ImageCollection('COPERNICUS/S1_GRD')
+    .filter(ee.Filter.eq('instrumentMode', 'IW'))
+    .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+    .filter(ee.Filter.eq('resolution', 'H'))
+    //.filterBounds(geometry) //Turn this line of code on to only take images from your region of interest (makes rendering faster)
+    .select(['VH']);
+    
+//Calling in only SAR Data that you want. Set dates and min,mean,max for your images here. 
+//for example min for flood, and max for built up areas
+var im1 = ee.Image(collectionVH.filterDate('2017-08-15', '2017-09-15').min());
+var im2 = ee.Image(collectionVH.filterDate('2016-08-15', '2016-09-15').min()); 
+
+//Add the images to the map
+Map.addLayer(im1, {min: -25, max: 0}, 'flood');
+Map.addLayer(im2, {min: -25, max: 0}, 'no flood');
+
+// Pre-define some customization options.
+var options = {
+  title: 'im1 Histogram',
+  fontSize: 15,
+  hAxis: {title: 'Reflection Value'},
+  vAxis: {title: 'count of Value'},
+  series: {0: {color: 'blue'}}}
+//Create histogram for your region of interest set by geometry above 
+var histogram1 = ui.Chart.image.histogram(im1, geometry, 30)
+    .setSeriesNames(['histogram of img1'])
+    .setOptions(options);
+// Display the histogram.
+print(histogram1);
+
+//Histogram of second image
+var options2 = {
+  title: 'im2 Histogram',
+  fontSize: 15,
+  hAxis: {title: 'Reflection Value'},
+  vAxis: {title: 'count of Value'},
+  series: {0: {color: 'red'}}}
+  
+var histogram2 = ui.Chart.image.histogram(im2, geometry, 30)
+    .setSeriesNames(['histogram of img2'])
+    .setOptions(options2);
+// Display the histogram.
+print(histogram2);
+
+//Create a rectangle to visualize your ROI (Histograms only count the values inside the rectangle)
+Map.addLayer(rectangle,{},'region of interest'); 
