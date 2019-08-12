@@ -1,0 +1,181 @@
+
+//ROI for testing ratio of Radiance to Temperature
+var lon2 = -112.38,lat2 = 33.68;  
+var width2 = 0.1, height2 = 0.1; 
+var ROI_ratio = ee.Geometry.Rectangle([lon2-width2,lat2+height2,lon2+width2,lat2-height2]); // (do not change the ‘NYC’ name tag in this line or you will need to change the name tag many times throughout the below sections)
+
+//ROI for data profiles
+var lon1 = -112.10,lat1 = 33.4597;  
+var width1 = 0.7, height1 = 0.3;  
+var ROI = ee.Geometry.Rectangle([lon1-width1,lat1+height1,lon1+width1,lat1-height1]); // (do not change the ‘NYC’ name tag in this line or you will need to change the name tag many times throughout the below sections)
+
+//Loading data
+//Load Aster data. You should upload your own image but keep the variable name as 'AsterNight'
+var AsterNight = ee.Image("users/sua215/Monitoring/F_AST_08_00308232017053536_20190217142713_17080_SurfaceKineticTemperature");
+// Load modis external image which is downloaded from NASA
+var modisEx = ee.Image("users/sua215/Monitoring/MOD11A1A2017235h08v050062017249180047_MODIS_Grid_Daily_1km_LST");
+
+//Load a MODIS image.  
+//Change dates below (refer to the line ‘filterDate’ if your area didn’t have images at that time of year)
+var modis1 = ee.ImageCollection('MODIS/MOD11A2')  
+           .filterDate('2016-6-01', '2016-6-30')   
+            .select('LST_Day_1km','LST_Night_1km')  
+            .filterBounds(ROI);  
+
+//Transfer Modis to Celsius degree.    
+var modis = ee.Image(modis1.first())  
+              .multiply(0.02)  
+              .subtract(273.15);
+
+//Load Aster L1T radiance
+var aster_L1T = ee.ImageCollection('ASTER/AST_L1T_003')
+                  .filter(ee.Filter.date('2018-06-01', '2018-06-30'));
+var  asterL1T= aster_L1T.select(['B13']);
+var asterL1T = ee.Image(asterL1T.mean());
+
+//convert to celcius for Aster external image
+var Aster_night = ee.Image(AsterNight)  
+              .multiply(0.1)
+              .subtract(273.15); 
+
+var modis_nasa = ee.Image(modisEx)  
+              .multiply(0.02)
+              .subtract(273.15); 
+
+//Find ratio for aster radiance and temperature
+var aster_radiance = aster_L1T.select(['B13']).mean();
+var ratio = Aster_night.divide(aster_radiance);
+              
+//Create a histogram for the Ratio
+var options = {
+  fontSize: 12,
+  hAxis: {title: 'Ratio: radiance and temperature'},
+  vAxis: {title: 'No. of pixels'},
+  series: {0: {color: 'blue'}}}
+
+var histogram1 = ui.Chart.image.histogram(ratio, ROI_ratio, 1000)
+    .setSeriesNames(['Ratio: radiance and temperature'])
+    .setOptions(options);
+// Display the histogram.
+print(histogram1);            
+
+//Visulization            
+// Define visualizarion for the Modis daytime parametres.
+var vizParamsDay1 = {  
+  bands: 'LST_Day_1km',  
+  min: 15,  
+  max: 45,  
+  gamma: 1  
+};  
+// Define visualizarion for the Modis nighttime parametres. 
+var vizParamsNight1 = {  
+  bands: 'LST_Night_1km',  
+  min: 15,  
+  max: 35,  
+  gamma: 1  
+};  
+// Define visualizarion for  the aster temperature. 
+var vizParamsAster1 = {  
+  bands: 'b1',  
+  min: 0,  
+  max: 35  
+  //gamma: 1  
+}; 
+// Define visualizarion for the aster radiance.
+var astervis = {
+  min: 1500.0,
+  max: 2000.0,
+};
+//create variable for different image layer
+var Modis_Day = modis.select('LST_Day_1km');  
+var Modis_Night = modis.select('LST_Night_1km');
+var Aster_night = Aster_night.select('b1');
+var Aster_radiance = asterL1T.select('B13');
+
+// Display images in GEE  
+Map.addLayer(asterL1T, astervis, 'Aster rediance');
+Map.addLayer(Modis_Day, vizParamsDay1, 'modis_Day_temperature');  
+Map.addLayer(Modis_Night, vizParamsNight1, 'modis_Night_temperature');
+Map.addLayer(Aster_night, vizParamsAster1, 'aster night temperature');
+Map.addLayer(modis_nasa, vizParamsAster1, 'Modis night temperature external image');
+//Map.addLayer(ROI_ratio, {}, 'ROI ratio');
+
+//Create profile and load temperature of different layer
+// Create the function set points on the profile line for temperature data collection
+var range1 = function(start, end, step) {  
+    var range1 = [];  
+    while (step > 0 ? end >= start : end <= start) {  
+        range1.push(start);  
+        start += step;  
+    }  
+return range1;  
+};  
+
+// The lines below specifies the creation of the profile line
+var y1  = lat1; // the latitude of the profile line  
+var xb1 = lon1-width1; // the longitude of profile line beginning point  
+var xe1 = lon1+width1; // the longitude of profile line end point  
+var N1 = 500; // the number of samples on the profile line  
+
+var R1 = range1(xb1,xe1,(xe1-xb1)/N1);  
+var arr1Day1 = [];  
+var arr1Night1 = [];  
+var arr1All1 = [];  
+
+//Set a series of points on the line which have the radius of 200 to get the temperatures from the map.
+
+for (var i1 = 0; i1 < N1; i1++) {   
+    var geom1 = ee.Geometry.Point([R1[i1], y1])  
+                          .buffer(200); 
+                    
+//Calculate the mean value inside the points.   
+var pixelValmodisDay = Modis_Day.clip(geom1).reduceRegion({  
+                          reducer: ee.Reducer.mean(),  
+                        geometry: geom1,  
+                          scale: 1});  
+
+var pixelValmodisNight = Modis_Night.clip(geom1).reduceRegion({  
+                          reducer: ee.Reducer.mean(),  
+                          geometry: geom1,  
+                          scale: 1});  
+                         
+
+var pixelValAsternight = Aster_night.clip(geom1).reduceRegion({  
+                          reducer: ee.Reducer.mean(),  
+                          geometry: geom1,  
+                          scale: 1}); 
+
+var pixelValAsterRad = Aster_radiance.clip(geom1).reduceRegion({  
+                          reducer: ee.Reducer.mean(),  
+                          geometry: geom1,  
+                          scale: 1});
+
+var pixelValMOSISExRad = modis_nasa.clip(geom1).reduceRegion({  
+                          reducer: ee.Reducer.mean(),  
+                          geometry: geom1,  
+                          scale: 1});
+
+                          
+var arr1 = [pixelValAsterRad.values().get(0),pixelValmodisDay.values().get(0),pixelValmodisNight.values().get(0),pixelValAsternight.values().get(0), pixelValMOSISExRad.values().get(0)];  
+var val1 = ee.Feature(ee.Geometry.Point(R1[i1], y1), {value: arr1});    
+   arr1All1.push(val1);}  
+var point_1 = ee.Geometry.Point([R1[i1],y1]);  
+
+ 
+// change lat and lon of below point to your profile line center location  
+var midpoint1 = ee.Geometry.Point(lon1,lat1);  
+// Make a feature without geometry and set the properties to the dictionary of means.  
+
+// Wrap the Feature in a FeatureCollection for export.  
+var featureCollection1 = ee.FeatureCollection(arr1All1);  
+// Export the FeatureCollection.  
+Export.table.toDrive({  
+  collection: featureCollection1,  
+  description: 'exportTable',  
+  fileFormat: 'CSV1'  
+});  
+print('done1');  
+  
+var line1 = ee.Geometry.LineString([xb1,y1,xe1,y1]);  
+Map.addLayer(line1, {}, 'profile_line1');  
+Map.setCenter(lon1, lat1, 9)
